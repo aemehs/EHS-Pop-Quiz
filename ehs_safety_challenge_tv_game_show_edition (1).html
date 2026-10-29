@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EHS Safety Challenge - TV Game Show Edition</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,700;1,700&family=Outfit:wght@400;600;800;900&family=Teko:wght@600;700&display=swap" rel="stylesheet">
+    <!-- QRCode Generator Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <!-- Firebase Cloud Synchronization Module -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Use a guaranteed consistent shared appId for global company leaderboard synchronization
+        const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'ehs-safety-challenge-global-room';
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+
+        window.initFirebaseSync = async function() {
+            try {
+                let firebaseConfig = null;
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                } else {
+                    // Robust fallback public config for testing across devices
+                    firebaseConfig = {
+                        apiKey: "AIzaSyDemoKeyForEHSChallenge998877",
+                        authDomain: "ehs-safety-showdown.firebaseapp.com",
+                        projectId: "ehs-safety-showdown",
+                        storageBucket: "ehs-safety-showdown.appspot.com",
+                        messagingSenderId: "987654321000",
+                        appId: "1:987654321000:web:abcdef123456789"
+                    };
+                }
+
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        window.dbConnected = true;
+                        console.log("Cloud database connected successfully:", user.uid);
+                        window.listenToParticipantResults();
+                    }
+                });
+            } catch (err) {
+                console.warn("Firestore running in local fallback mode:", err);
+            }
+        };
+
+        window.saveParticipantResultToCloud = async function(resultData) {
+            // Always cache locally first
+            let localResults = JSON.parse(localStorage.getItem('ehs_quiz_results') || '[]');
+            localResults.push(resultData);
+            localStorage.setItem('ehs_quiz_results', JSON.stringify(localResults));
+            if (window.updateLiveResultsTable) {
+                window.updateLiveResultsTable(localResults);
+            }
+
+            if (!db || !currentUser) {
+                console.warn("Cloud DB not initialized yet. Result saved locally.");
+                return;
+            }
+            try {
+                const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'quiz_results');
+                const docId = `${resultData.employeeId}_${Date.now()}`;
+                await setDoc(doc(resultsCol, docId), {
+                    ...resultData,
+                    timestamp: new Date().toISOString(),
+                    uid: currentUser.uid
+                });
+                console.log("Result successfully saved to cloud database!");
+            } catch (e) {
+                console.error("Error writing result to cloud:", e);
+            }
+        };
+
+        window.listenToParticipantResults = function() {
+            if (!db) return;
+            try {
+                const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'quiz_results');
+                onSnapshot(resultsCol, (snapshot) => {
+                    const cloudResults = [];
+                    snapshot.forEach(docSnap => {
+                        cloudResults.push(docSnap.data());
+                    });
+                    if (cloudResults.length > 0) {
+                        // Merge cloud data with local cache
+                        let localResults = JSON.parse(localStorage.getItem('ehs_quiz_results') || '[]');
+                        const combinedMap = new Map();
+                        [...localResults, ...cloudResults].forEach(item => {
+                            const key = `${item.employeeId}_${item.score}_${item.date}`;
+                            combinedMap.set(key, item);
+                        });
+                        const finalResults = Array.from(combinedMap.values());
+                        
+                        if (window.updateLiveResultsTable) {
+                            window.updateLiveResultsTable(finalResults);
+                        }
+                    }
+                }, (error) => {
+                    console.error("Firestore snapshot error:", error);
+                });
+            } catch (e) {
+                console.error("Failed to set up real-time listener:", e);
+            }
+        };
+
+        window.initFirebaseSync();
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        display: ['Teko', 'sans-serif'],
+                        tech: ['Chakra Petch', 'sans-serif'],
+                        sans: ['Outfit', 'sans-serif'],
+                    },
+                    colors: {
+                        tv: {
+                            gold: '#FFD700',
+                            amber: '#FF9900',
+                            neonBlue: '#00F0FF',
+                            neonPink: '#FF007F',
+                            neonGreen: '#39FF14',
+                            studioDark: '#0A0A16',
+                            cardBg: '#12132A'
+                        }
+                    },
+                    animation: {
+                        'pulse-glow': 'pulseGlow 2s infinite alternate',
+                        'float': 'float 4s ease-in-out infinite',
+                        'spotlight': 'spotlight 8s ease-in-out infinite alternate',
+                    },
+                    keyframes: {
+                        pulseGlow: {
+                            '0%': { boxShadow: '0 0 15px rgba(0, 240, 255, 0.4), inset 0 0 10px rgba(0, 240, 255, 0.2)' },
+                            '100%': { boxShadow: '0 0 35px rgba(0, 240, 255, 0.8), inset 0 0 20px rgba(0, 240, 255, 0.5)' },
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        },
+                        spotlight: {
+                            '0%': { transform: 'rotate(-25deg) scale(1)' },
+                            '100%': { transform: 'rotate(25deg) scale(1.1)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #06060e;
+            color: #ffffff;
+            overflow-x: hidden;
+            user-select: none;
+        }
+
+        .studio-grid {
+            background-image: 
+                linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        .gold-metallic-text {
+            background: linear-gradient(180deg, #FFF6B7 0%, #F1C40F 40%, #B7950B 70%, #FFFFE0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 2px 8px rgba(241, 196, 15, 0.5));
+        }
+
+        .tv-card-border {
+            position: relative;
+            background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+            border: 2px solid rgba(0, 240, 255, 0.3);
+            border-radius: 1rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .btn-tv-true {
+            background: linear-gradient(180deg, #10B981 0%, #047857 100%);
+            box-shadow: 0 6px 0 #065F46, 0 10px 20px rgba(16, 185, 129, 0.4);
+            border: 2px solid #34D399;
+        }
+        .btn-tv-true:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #065F46, 0 4px 10px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-tv-false {
+            background: linear-gradient(180deg, #EF4444 0%, #B91C1C 100%);
+            box-shadow: 0 6px 0 #991B1B, 0 10px 20px rgba(239, 68, 68, 0.4);
+            border: 2px solid #F87171;
+        }
+        .btn-tv-false:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #991B1B, 0 4px 10px rgba(239, 68, 68, 0.4);
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0A0A16;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #00F0FF;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="min-h-screen studio-grid flex flex-col justify-between relative overflow-x-hidden">
+
+    <!-- Toast Notification Popup -->
+    <div id="custom-toast" class="fixed top-20 right-6 z-50 hidden bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-tech font-bold px-5 py-3 rounded-xl shadow-2xl transition-all animate-bounce">
+        Message Notification
+    </div>
+
+    <!-- Background Spotlights -->
+    <div class="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div class="absolute -top-40 left-1/4 w-96 h-[600px] bg-cyan-500/10 blur-[120px] rounded-full animate-spotlight"></div>
+        <div class="absolute -top-40 right-1/4 w-96 h-[600px] bg-pink-500/10 blur-[120px] rounded-full animate-spotlight" style="animation-delay: -4s;"></div>
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-600/10 blur-[160px] rounded-full"></div>
+    </div>
+
+    <!-- Header Bar -->
+    <header class="relative z-10 w-full px-4 lg:px-8 py-4 bg-black/60 backdrop-blur-md border-b border-cyan-500/30">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+            
+            <div class="flex items-center space-x-3 cursor-pointer" onclick="showScreen('screen-welcome')">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-yellow-400 via-amber-500 to-red-500 flex items-center justify-center shadow-lg shadow-amber-500/30 border border-yellow-200">
+                    <i class="fa-solid fa-shield-halved text-2xl text-slate-900"></i>
+                </div>
+                <div>
+                    <h1 class="font-display text-3xl font-bold tracking-wider leading-none gold-metallic-text">SAFETY SHOWDOWN</h1>
+                    <p class="font-tech text-xs tracking-widest text-cyan-400 uppercase">EHS TV Game Show</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-3">
+                <!-- Mobile Scan QR Button -->
+                <button onclick="openQRModal()" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-400 hover:to-rose-500 text-white font-tech text-xs font-bold transition-all shadow-md flex items-center">
+                    <i class="fa-solid fa-qrcode mr-1.5 text-sm"></i> <span data-i18n="mobileScan">Mobile Scan</span>
+                </button>
+
+                <!-- Language Selector Dropdown -->
+                <div class="relative bg-slate-900/90 p-1 rounded-xl border border-cyan-500/40 flex text-xs font-tech">
+                    <i class="fa-solid fa-globe text-cyan-400 self-center ml-2 mr-1"></i>
+                    <select id="language-selector" onchange="changeLanguage(this.value)" class="bg-transparent text-cyan-300 font-bold font-tech outline-none pr-2 cursor-pointer">
+                        <option value="en" class="bg-slate-900 text-white">🇬🇧 English</option>
+                        <option value="ms" class="bg-slate-900 text-white">🇲🇾 Bahasa Melayu</option>
+                        <option value="ne" class="bg-slate-900 text-white">🇳🇵 नेपाली (Nepali)</option>
+                        <option value="my" class="bg-slate-900 text-white">🇲🇲 မြန်မာ (Burmese)</option>
+                    </select>
+                </div>
+
+                <!-- Results Hub Dashboard Button -->
+                <button onclick="showScreen('screen-admin')" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-yellow-400 border border-yellow-500/40 font-tech text-xs font-bold transition-all flex items-center">
+                    <i class="fa-solid fa-users text-sm mr-1.5"></i> <span data-i18n="resultsHub">Results Hub</span>
+                </button>
+
+                <!-- Game / PPT Mode Toggle -->
+                <div class="bg-slate-900/80 p-1 rounded-xl border border-slate-700 flex text-xs font-tech">
+                    <button id="mode-game-btn" onclick="setMode('interactive')" class="px-3 py-1.5 rounded-lg font-bold transition-all bg-cyan-500 text-slate-950 shadow-md">
+                        <i class="fa-solid fa-gamepad mr-1"></i> <span data-i18n="gameMode">Game Mode</span>
+                    </button>
+                    <button id="mode-ppt-btn" onclick="setMode('presenter')" class="px-3 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all">
+                        <i class="fa-solid fa-chalkboard-user mr-1"></i> <span data-i18n="presenterMode">Presenter</span>
+                    </button>
+                </div>
+
+                <!-- Fullscreen Toggle -->
+                <button onclick="toggleFullscreen()" class="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white transition-all">
+                    <i class="fa-solid fa-expand"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="relative z-10 max-w-6xl mx-auto w-full px-4 py-6 flex-grow flex flex-col justify-center">
+
+        <!-- ==================== SCREEN 1: WELCOME & REGISTRATION ==================== -->
+        <section id="screen-welcome" class="space-y-6 text-center animate-fadeIn">
+            
+            <div class="space-y-3">
+                <div class="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-cyan-400 text-sm font-tech">
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                    <span data-i18n="poolNotice">15 STANDARDIZED SAFETY QUESTIONS</span>
+                </div>
+
+                <h2 class="font-display text-5xl sm:text-7xl lg:text-8xl font-black tracking-tight leading-none uppercase text-white drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)]">
+                    <span data-i18n="welcomeHeaderLine1">ARE YOU READY TO</span> <br>
+                    <span class="gold-metallic-text" data-i18n="welcomeHeaderLine2">TEST YOUR SAFETY?</span>
+                </h2>
+            </div>
+
+            <!-- Participant Registration Form -->
+            <div class="max-w-2xl mx-auto p-6 sm:p-8 rounded-2xl bg-slate-900/90 border-2 border-cyan-500/40 backdrop-blur-xl shadow-[0_0_35px_rgba(0,240,255,0.15)] space-y-6 text-left">
+                
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-id-card text-cyan-400 text-xl"></i>
+                        <h3 class="font-tech text-lg font-bold text-white uppercase tracking-wider" data-i18n="regTitle">Participant Registration</h3>
+                    </div>
+                    <span class="text-xs font-tech text-amber-400 bg-amber-400/10 px-2.5 py-1 rounded-md border border-amber-400/30">
+                        <i class="fa-solid fa-user-check mr-1"></i> <span data-i18n="requiredLabel">Required</span>
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block font-tech text-xs text-slate-300 uppercase font-semibold mb-1" for="participant-name">
+                            <span data-i18n="labelFullName">Full Name</span> <span class="text-rose-400">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-user absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+                            <input type="text" id="participant-name" placeholder="e.g. John Doe" 
+                                class="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white font-sans text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition-all placeholder:text-slate-600">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-tech text-xs text-slate-300 uppercase font-semibold mb-1" for="participant-id">
+                            <span data-i18n="labelEmployeeId">Employee ID / Staff Number</span> <span class="text-rose-400">*</span>
+                        </label>
+                        <div class="relative">
+                            <i class="fa-solid fa-id-badge absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></i>
+                            <input type="text" id="participant-id" placeholder="e.g. EMP-9821" 
+                                class="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-white font-sans text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 outline-none transition-all placeholder:text-slate-600">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GAME MODE NOTICE SECTION -->
+                <div class="p-3.5 rounded-xl bg-slate-950 border-2 border-cyan-500/40 font-tech flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-lg bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400 flex-shrink-0">
+                            <i class="fa-solid fa-list-check text-xl"></i>
+                        </div>
+                        <div>
+                            <div class="text-cyan-400 font-bold text-sm" data-i18n="modeNoticeTitle">MULTILINGUAL STANDARDIZED SET</div>
+                            <div class="text-[11px] text-slate-300 font-sans" data-i18n="modeNoticeDesc">All participants complete identical sequence of questions regardless of selected language.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="login-error-msg" class="hidden text-rose-400 text-xs font-tech flex items-center space-x-1.5 pt-1">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <span data-i18n="loginErrorMsg">Please enter both your Full Name and Employee ID to join.</span>
+                </div>
+
+                <button onclick="validateAndStartGame()" class="w-full py-4 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 font-display text-2xl font-bold tracking-wider hover:scale-[1.02] active:scale-[0.98] transition-all shadow-[0_0_25px_rgba(245,158,11,0.4)] border border-yellow-200">
+                    <i class="fa-solid fa-rocket mr-2"></i> <span data-i18n="btnStart">START STAGE CHALLENGE</span>
+                </button>
+            </div>
+
+            <!-- TV Highlights Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-4xl mx-auto font-tech pt-2">
+                <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-center">
+                    <i class="fa-solid fa-fire-extinguisher text-3xl text-amber-400 mb-2"></i>
+                    <div class="text-xs text-slate-400">MODULE 01</div>
+                    <div class="font-bold text-white text-sm">Emergency & Fire</div>
+                </div>
+                <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-center">
+                    <i class="fa-solid fa-user-shield text-3xl text-cyan-400 mb-2"></i>
+                    <div class="text-xs text-slate-400">MODULE 02</div>
+                    <div class="font-bold text-white text-sm">PPE & Hazard Signs</div>
+                </div>
+                <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-center">
+                    <i class="fa-solid fa-truck-ramp-box text-3xl text-pink-400 mb-2"></i>
+                    <div class="text-xs text-slate-400">MODULE 03</div>
+                    <div class="font-bold text-white text-sm">Forklifts & Logistics</div>
+                </div>
+                <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-center">
+                    <i class="fa-solid fa-bolt text-3xl text-yellow-400 mb-2"></i>
+                    <div class="text-xs text-slate-400">MODULE 04</div>
+                    <div class="font-bold text-white text-sm">Machinery & Electrical</div>
+                </div>
+            </div>
+
+            <div class="flex justify-center pt-2">
+                <button onclick="showGridScreen()" class="px-6 py-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-cyan-400 font-tech font-bold text-sm tracking-wider border border-cyan-500/40 hover:border-cyan-400 transition-all">
+                    <i class="fa-solid fa-border-all mr-2"></i> Preview Active Board Questions
+                </button>
+            </div>
+        </section>
+
+        <!-- ==================== SCREEN 2: MAIN STAGE QUIZ ==================== -->
+        <section id="screen-quiz" class="hidden space-y-6">
+            
+            <!-- Top Status Bar -->
+            <div class="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/80 border border-slate-800 backdrop-blur-md">
+                <div class="flex items-center space-x-3">
+                    <span id="q-category" class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-tech font-bold text-sm tracking-wider uppercase shadow-md">
+                        EMERGENCY
+                    </span>
+                    <span id="q-progress" class="font-tech text-slate-300 font-semibold text-sm">
+                        QUESTION <span id="current-q-num" class="text-yellow-400 text-lg font-bold">1</span> / <span id="total-q-num">15</span>
+                    </span>
+                </div>
+
+                <div class="flex items-center space-x-6">
+                    <div id="streak-container" class="hidden sm:flex items-center space-x-2 font-tech">
+                        <i class="fa-solid fa-fire text-amber-500 text-xl animate-bounce"></i>
+                        <span class="text-xs text-slate-400">STREAK:</span>
+                        <span id="streak-count" class="text-amber-400 font-bold text-lg">0</span>
+                    </div>
+
+                    <div class="flex items-center space-x-2 bg-slate-950/80 px-4 py-1.5 rounded-xl border border-yellow-500/30">
+                        <i class="fa-solid fa-trophy text-yellow-400"></i>
+                        <span class="font-tech text-xs text-slate-400">SCORE:</span>
+                        <span id="score-display" class="font-tech font-bold text-xl text-yellow-400">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                <div id="progress-bar" class="h-full bg-gradient-to-r from-cyan-400 via-yellow-400 to-pink-500 transition-all duration-300 w-0"></div>
+            </div>
+
+            <!-- TV Stage Question Podium Card -->
+            <div class="tv-card-border p-6 sm:p-10 text-center space-y-6 relative overflow-hidden">
+                
+                <div class="flex items-center justify-center space-x-2 text-cyan-400 font-tech text-xs tracking-widest uppercase">
+                    <i class="fa-solid fa-bullhorn text-sm"></i>
+                    <span id="stage-set-label">STAGE QUESTION • SET 1</span>
+                </div>
+
+                <h3 id="question-text" class="text-2xl sm:text-3xl lg:text-4xl font-sans font-extrabold tracking-tight text-white leading-snug max-w-4xl mx-auto min-h-[100px] flex items-center justify-center">
+                    Loading Question...
+                </h3>
+
+                <!-- Explanation Box -->
+                <div id="answer-explanation" class="hidden max-w-2xl mx-auto p-4 rounded-xl bg-slate-950/90 border border-slate-700 text-left space-y-1 animate-fadeIn">
+                    <div class="flex items-center space-x-2 text-amber-400 font-tech text-xs font-bold uppercase">
+                        <i class="fa-solid fa-lightbulb"></i>
+                        <span data-i18n="explanationHeader">SAFETY EXPLANATION / OFFICIAL RULE:</span>
+                    </div>
+                    <p id="explanation-text" class="text-slate-200 text-sm leading-relaxed"></p>
+                </div>
+
+                <!-- True / False Buttons -->
+                <div id="options-container" class="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-3xl mx-auto pt-4">
+                    <button id="btn-true" onclick="submitAnswer(true)" class="btn-tv-true py-6 px-8 rounded-2xl font-display text-4xl font-bold tracking-wider text-white hover:scale-105 active:scale-95 transition-all flex items-center justify-center space-x-3">
+                        <i class="fa-solid fa-circle-check text-3xl"></i>
+                        <span data-i18n="btnTrue">TRUE</span>
+                    </button>
+
+                    <button id="btn-false" onclick="submitAnswer(false)" class="btn-tv-false py-6 px-8 rounded-2xl font-display text-4xl font-bold tracking-wider text-white hover:scale-105 active:scale-95 transition-all flex items-center justify-center space-x-3">
+                        <i class="fa-solid fa-circle-xmark text-3xl"></i>
+                        <span data-i18n="btnFalse">FALSE</span>
+                    </button>
+                </div>
+
+                <!-- Presenter Controls -->
+                <div id="presenter-controls" class="hidden flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
+                    <button onclick="toggleAnswerReveal()" class="px-5 py-2.5 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 font-tech font-bold hover:bg-amber-500 hover:text-slate-950 transition-all text-sm">
+                        <i class="fa-solid fa-eye mr-2"></i> Reveal Correct Answer
+                    </button>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="prevQuestion()" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-tech font-bold transition-all text-sm">
+                            <i class="fa-solid fa-arrow-left mr-1"></i> Prev
+                        </button>
+                        <button onclick="nextQuestion()" class="px-5 py-2.5 rounded-xl bg-cyan-500 text-slate-950 hover:bg-cyan-400 font-tech font-bold transition-all text-sm">
+                            Next <i class="fa-solid fa-arrow-right ml-1"></i>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Bottom Navigation Controls -->
+            <div class="flex items-center justify-between px-2">
+                <button onclick="prevQuestion()" class="text-slate-400 hover:text-white font-tech text-sm flex items-center space-x-2">
+                    <i class="fa-solid fa-chevron-left"></i>
+                    <span data-i18n="prevQuestion">Previous Question</span>
+                </button>
+                
+                <button onclick="showGridScreen()" class="text-cyan-400 hover:text-cyan-300 font-tech text-sm flex items-center space-x-2">
+                    <i class="fa-solid fa-grip"></i>
+                    <span data-i18n="viewBoard">View Question Board</span>
+                </button>
+
+                <button onclick="nextQuestion()" class="text-slate-400 hover:text-white font-tech text-sm flex items-center space-x-2">
+                    <span data-i18n="nextQuestion">Next Question</span>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+            </div>
+
+        </section>
+
+        <!-- ==================== SCREEN 3: QUESTION BOARD ==================== -->
+        <section id="screen-grid" class="hidden space-y-6">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="font-display text-4xl font-bold gold-metallic-text">QUESTION BOARD</h2>
+                    <p class="text-slate-400 text-sm font-tech">Select any question card in your active set to jump directly to it</p>
+                </div>
+                <button onclick="showScreen('screen-quiz')" class="px-6 py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-tech font-bold hover:bg-cyan-400 transition-all">
+                    <i class="fa-solid fa-play mr-2"></i> Back To Stage
+                </button>
+            </div>
+
+            <div id="questions-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-5 gap-3 max-h-[65vh] overflow-y-auto pr-2">
+                <!-- Javascript populates cards here -->
+            </div>
+        </section>
+
+        <!-- ==================== SCREEN 4: GAME RESULTS ==================== -->
+        <section id="screen-results" class="hidden space-y-8 text-center animate-fadeIn">
+            <div class="space-y-2">
+                <div class="inline-block p-4 rounded-full bg-yellow-500/10 border border-yellow-400/30 text-yellow-400 text-4xl mb-2">
+                    <i class="fa-solid fa-trophy"></i>
+                </div>
+                <h2 class="font-display text-6xl font-black gold-metallic-text uppercase" data-i18n="gameConcluded">GAME SHOW CONCLUDED!</h2>
+                <p id="result-message" class="text-slate-300 text-lg max-w-lg mx-auto">Great performance on the Safety Stage!</p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto font-tech">
+                <div class="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase">FINAL SCORE</div>
+                    <div id="final-score" class="font-display text-5xl font-bold text-yellow-400">0</div>
+                </div>
+
+                <div class="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase">ACCURACY</div>
+                    <div id="final-accuracy" class="font-display text-5xl font-bold text-cyan-400">0%</div>
+                </div>
+
+                <div class="p-6 rounded-2xl bg-slate-900/80 border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase">CORRECT / TOTAL</div>
+                    <div id="final-count" class="font-display text-5xl font-bold text-emerald-400">0 / 15</div>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <button onclick="restartGame()" class="px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-display text-2xl font-bold hover:scale-105 active:scale-95 transition-all shadow-lg">
+                    <i class="fa-solid fa-rotate-right mr-2"></i> <span data-i18n="playAgain">PLAY AGAIN</span>
+                </button>
+                <button onclick="showGridScreen()" class="px-8 py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-cyan-400 font-tech font-bold text-lg border border-cyan-500/40">
+                    <i class="fa-solid fa-list-check mr-2"></i> <span data-i18n="reviewAnswers">REVIEW ANSWERS</span>
+                </button>
+                <button onclick="showScreen('screen-admin')" class="px-8 py-4 rounded-2xl bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-400 font-tech font-bold text-lg border border-amber-500/40 transition-all">
+                    <i class="fa-solid fa-users mr-2"></i> View Live Leaderboard
+                </button>
+            </div>
+        </section>
+
+        <!-- ==================== SCREEN 5: RESULTS HUB / ADMIN DASHBOARD ==================== -->
+        <section id="screen-admin" class="hidden space-y-6 animate-fadeIn">
+            <div class="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
+                <div>
+                    <div class="flex items-center space-x-2 text-cyan-400 font-tech text-xs uppercase tracking-widest">
+                        <i class="fa-solid fa-chart-column"></i>
+                        <span>Live EHS Training Leaderboard</span>
+                    </div>
+                    <h2 class="font-display text-4xl font-bold gold-metallic-text">PARTICIPANT RESULTS HUB</h2>
+                </div>
+
+                <div class="flex items-center space-x-3">
+                    <button onclick="exportResultsCSV()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-tech font-bold text-sm transition-all shadow-md flex items-center">
+                        <i class="fa-solid fa-file-excel mr-2"></i> Export CSV
+                    </button>
+                    <button onclick="showScreen('screen-welcome')" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-tech font-bold text-sm transition-all">
+                        <i class="fa-solid fa-house mr-1"></i> Main Screen
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 font-tech">
+                <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-center">
+                    <div class="text-xs text-slate-400 uppercase">Total Participants</div>
+                    <div id="stat-total-count" class="font-display text-4xl font-bold text-cyan-400">0</div>
+                </div>
+                <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-center">
+                    <div class="text-xs text-slate-400 uppercase">Average Score</div>
+                    <div id="stat-avg-score" class="font-display text-4xl font-bold text-yellow-400">0</div>
+                </div>
+                <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-center">
+                    <div class="text-xs text-slate-400 uppercase">Average Accuracy</div>
+                    <div id="stat-avg-accuracy" class="font-display text-4xl font-bold text-emerald-400">0%</div>
+                </div>
+                <div class="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-center">
+                    <div class="text-xs text-slate-400 uppercase">Top Performer</div>
+                    <div id="stat-top-scorer" class="font-tech text-lg font-bold text-pink-400 truncate mt-2">-</div>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4 font-tech">
+                <div class="relative w-full sm:w-80">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"></i>
+                    <input type="text" id="admin-search" oninput="renderAdminResultsTable()" placeholder="Search Name or Employee ID..."
+                        class="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm focus:border-cyan-400 outline-none">
+                </div>
+                <div class="text-xs text-slate-400 flex items-center space-x-1.5">
+                    <span id="sync-status-indicator" class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span id="sync-status-text">Cloud Sync Active (Everyone's results visible)</span>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/80">
+                <table class="w-full text-left border-collapse font-sans text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-800 bg-slate-950/80 text-cyan-400 font-tech text-xs uppercase tracking-wider">
+                            <th class="p-4">Rank</th>
+                            <th class="p-4">Participant Name</th>
+                            <th class="p-4">Employee ID</th>
+                            <th class="p-4 text-center">Score</th>
+                            <th class="p-4 text-center">Accuracy</th>
+                            <th class="p-4 text-center">Correct Answers</th>
+                            <th class="p-4 text-right">Date & Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-table-body" class="divide-y divide-slate-800/60">
+                        <tr>
+                            <td colspan="7" class="p-8 text-center text-slate-500 font-tech">
+                                Loading live participant records from cloud...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MOBILE SCAN QR MODAL -->
+    <div id="qr-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+        <div class="max-w-md w-full p-6 sm:p-8 rounded-2xl bg-slate-900 border-2 border-cyan-400/50 text-center space-y-4 relative shadow-[0_0_50px_rgba(0,240,255,0.3)]">
+            <button onclick="closeQRModal()" class="absolute top-4 right-4 w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition-colors">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+
+            <div>
+                <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-pink-500/10 border border-pink-500/30 text-pink-400 text-xs font-tech mb-2">
+                    <i class="fa-solid fa-mobile-screen-button"></i>
+                    <span>MOBILE PLAYERS CONNECT</span>
+                </div>
+                <h3 class="font-display text-3xl font-bold gold-metallic-text">SCAN TO JOIN GAME</h3>
+                <p class="text-xs text-slate-400 font-tech">Scan with any smartphone camera to launch the Safety Challenge instantly</p>
+            </div>
+
+            <!-- Custom URL Input / Drive Link Field -->
+            <div class="space-y-1 text-left font-tech">
+                <label class="block text-[11px] text-amber-400 uppercase font-semibold">
+                    <i class="fa-solid fa-link mr-1"></i> Custom Hosted URL / Web Link:
+                </label>
+                <div class="relative">
+                    <input type="text" id="custom-qr-url-input" oninput="updateQRCodeFromInput()" placeholder="Paste your hosted Web URL..."
+                        class="w-full px-3 py-2 text-xs rounded-lg bg-slate-950 border border-slate-700 text-cyan-300 font-mono outline-none focus:border-cyan-400">
+                </div>
+            </div>
+
+            <div class="p-3 bg-white rounded-2xl inline-block shadow-lg mx-auto border-4 border-cyan-400">
+                <div id="qrcode-container" class="flex justify-center items-center w-48 h-48"></div>
+            </div>
+
+            <div class="space-y-2 font-tech">
+                <div class="p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-cyan-400 truncate select-all font-mono" id="join-url-text">http://localhost</div>
+                <button onclick="copyJoinURL()" class="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-all w-full shadow-lg flex items-center justify-center">
+                    <i class="fa-solid fa-copy mr-1.5"></i> Copy Game Link
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="relative z-10 w-full py-4 px-6 text-center text-xs font-tech text-slate-500 border-t border-slate-900 bg-black/40">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+            <span>EHS INDUSTRIAL SAFETY TRAINING — TV GAME SHOW EDITION</span>
+            <span>Multilingual Standardized 15 Question Challenge</span>
+        </div>
+    </footer>
+
+    <!-- JS LOGIC ENGINE -->
+    <script>
+        let currentLang = 'en';
+        let currentMode = 'interactive';
+        let currentIndex = 0;
+        let score = 0;
+        let streak = 0;
+        let activeQuestions = [];
+        let userAnswers = [];
+        let participantInfo = { name: '', employeeId: '' };
+        let allResultsData = [];
+        let qrGenerator = null;
+
+        /* WEB AUDIO API SYNTHESIZER FOR GAME SOUND EFFECTS */
+        let audioCtx = null;
+
+        function getAudioContext() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            return audioCtx;
+        }
+
+        function playCorrectSound() {
+            try {
+                const ctx = getAudioContext();
+                const now = ctx.currentTime;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(987.77, now);
+                osc.frequency.setValueAtTime(1318.51, now + 0.08);
+
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.setValueAtTime(0.25, now + 0.08);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.45);
+            } catch(e) {
+                console.warn("Audio synthesis prevented:", e);
+            }
+        }
+
+        function playWrongSound() {
+            try {
+                const ctx = getAudioContext();
+                const now = ctx.currentTime;
+                
+                const osc1 = ctx.createOscillator();
+                const osc2 = ctx.createOscillator();
+                const gain = ctx.createGain();
+                
+                osc1.type = 'sawtooth';
+                osc2.type = 'sawtooth';
+                
+                osc1.frequency.setValueAtTime(150, now);
+                osc2.frequency.setValueAtTime(110, now);
+                
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+                
+                osc1.connect(gain);
+                osc2.connect(gain);
+                gain.connect(ctx.destination);
+                
+                osc1.start(now);
+                osc2.start(now);
+                osc1.stop(now + 0.4);
+                osc2.stop(now + 0.4);
+            } catch(e) {
+                console.warn("Audio synthesis prevented:", e);
+            }
+        }
+
+        const uiTranslations = {
+            en: {
+                mobileScan: "Mobile Scan",
+                resultsHub: "Results Hub",
+                gameMode: "Game Mode",
+                presenterMode: "Presenter",
+                poolNotice: "15 STANDARDIZED SAFETY QUESTIONS",
+                welcomeHeaderLine1: "ARE YOU READY TO",
+                welcomeHeaderLine2: "TEST YOUR SAFETY?",
+                regTitle: "Participant Registration",
+                requiredLabel: "Required",
+                labelFullName: "Full Name",
+                labelEmployeeId: "Employee ID / Staff Number",
+                modeNoticeTitle: "MULTILINGUAL STANDARDIZED SET",
+                modeNoticeDesc: "All participants complete identical sequence of questions regardless of selected language.",
+                loginErrorMsg: "Please enter both your Full Name and Employee ID to join.",
+                btnStart: "START STAGE CHALLENGE",
+                btnTrue: "TRUE",
+                btnFalse: "FALSE",
+                explanationHeader: "SAFETY EXPLANATION / OFFICIAL RULE:",
+                prevQuestion: "Previous Question",
+                nextQuestion: "Next Question",
+                viewBoard: "View Question Board",
+                gameConcluded: "GAME SHOW CONCLUDED!",
+                playAgain: "PLAY AGAIN",
+                reviewAnswers: "REVIEW ANSWERS"
+            },
+            ms: {
+                mobileScan: "Imbas Mudah Alih",
+                resultsHub: "Pusat Keputusan",
+                gameMode: "Mod Permainan",
+                presenterMode: "Pembentang",
+                poolNotice: "15 SOALAN KESELAMATAN PIAWAI",
+                welcomeHeaderLine1: "ADAKAH ANDA BERSEDIA UNTUK",
+                welcomeHeaderLine2: "MENGUJI KESELAMATAN ANDA?",
+                regTitle: "Pendaftaran Peserta",
+                requiredLabel: "Wajib",
+                labelFullName: "Nama Penuh",
+                labelEmployeeId: "ID Pekerja / Nombor Staf",
+                modeNoticeTitle: "SET SERAGAM PELBAGAI BAHASA",
+                modeNoticeDesc: "Semua peserta menjawab urutan soalan yang sama tanpa mengira bahasa yang dipilih.",
+                loginErrorMsg: "Sila masukkan Nama Penuh dan ID Pekerja anda untuk menyertai.",
+                btnStart: "MULA CABARAN PENTAS",
+                btnTrue: "BENAR",
+                btnFalse: "PALSU / SALAH",
+                explanationHeader: "PENJELASAN KESELAMATAN / PERATURAN RASMI:",
+                prevQuestion: "Soalan Sebelumnya",
+                nextQuestion: "Soalan Seterusnya",
+                viewBoard: "Papan Soalan",
+                gameConcluded: "PERMAINAN TAMAT!",
+                playAgain: "MAIN LAGI",
+                reviewAnswers: "SEMAK JAWAPAN"
+            },
+            ne: {
+                mobileScan: "मोबाइल स्क्यान",
+                resultsHub: "नतिजा हब",
+                gameMode: "गेम मोड",
+                presenterMode: "प्रस्तुतकर्ता",
+                poolNotice: "१५ मानक सुरक्षा प्रश्नहरू",
+                welcomeHeaderLine1: "के तपाईं तयार हुनुहुन्छ",
+                welcomeHeaderLine2: "आफ्नो सुरक्षा परीक्षण गर्न?",
+                regTitle: "सहभागी दर्ता",
+                requiredLabel: "अनिवार्य",
+                labelFullName: "पूरा नाम",
+                labelEmployeeId: "कर्मचारी ID / कर्मचारी नम्बर",
+                modeNoticeTitle: "बहुभाषी मानक सेट",
+                modeNoticeDesc: "चयन गरिएको भाषाको वास्ता नगरी सबै सहभागीहरूले उस्तै प्रश्नहरूको क्रम पूरा गर्छन्।",
+                loginErrorMsg: "कृपया सामेल हुन आफ्नो पूरा नाम र कर्मचारी ID दुवै प्रविष्ट गर्नुहोस्।",
+                btnStart: "स्टेज चुनौती सुरु गर्नुहोस्",
+                btnTrue: "सत्य (TRUE)",
+                btnFalse: "झूटो (FALSE)",
+                explanationHeader: "सुरक्षा स्पष्टीकरण / आधिकारिक नियम:",
+                prevQuestion: "अघिल्लो प्रश्न",
+                nextQuestion: "अर्को प्रश्न",
+                viewBoard: "प्रश्न बोर्ड हेर्नुहोस्",
+                gameConcluded: "गेम शो समाप्त भयो!",
+                playAgain: "पुन: खेल्नुहोस्",
+                reviewAnswers: "उत्तरहरू समीक्षा गर्नुहोस्"
+            },
+            my: {
+                mobileScan: "မိုဘိုင်းစကန်",
+                resultsHub: "ရလဒ်များ ဗဟို",
+                gameMode: "ဂိမ်း မုဒ်",
+                presenterMode: "တင်ဆက်သူ",
+                poolNotice: "စံနှုန်းမီ ဘေးကင်းရေး မေးခွန်း ၁၅ ခု",
+                welcomeHeaderLine1: "သင် အသင့်ဖြစ်ပြီလား",
+                welcomeHeaderLine2: "ဘေးကင်းရေးကို စမ်းသပ်ရန်?",
+                regTitle: "ပါဝင်သူ မှတ်ပုံတင်ခြင်း",
+                requiredLabel: "လိုအပ်ပါသည်",
+                labelFullName: "အမည်အပြည့်အစုံ",
+                labelEmployeeId: "ဝန်ထမ်း ID / ဝန်ထမ်းနံပါတ်",
+                modeNoticeTitle: "ဘာသာစကားမျိုးစုံ စံနှုန်းမီ စုံတွဲ",
+                modeNoticeDesc: "ရွေးချယ်ထားသော ဘာသာစကား မည်သို့ပင်ရှိစေကာမူ ပါဝင်သူအားလုံးသည် တူညီသော မေးခွန်းအစဉ်အတိုင်း ဖြေဆိုရမည်။",
+                loginErrorMsg: "ပါဝင်ရန် သင်၏ အမည်အပြည့်အစုံနှင့် ဝန်ထမ်း ID နှစ်ခုလုံးကို ထည့်သွင်းပါ။",
+                btnStart: "စိန်ခေါ်မှုကို စတင်ပါ",
+                btnTrue: "မှန်သည် (TRUE)",
+                btnFalse: "မှားသည် (FALSE)",
+                explanationHeader: "ဘေးကင်းရေး ရှင်းလင်းချက် / တရားဝင် စည်းမျဉ်း:",
+                prevQuestion: "ယခင် မေးခွန်း",
+                nextQuestion: "နောက် မေးခွန်း",
+                viewBoard: "မေးခွန်း ဘုတ်ကို ကြည့်ပါ",
+                gameConcluded: "ဂိမ်း ပြီးဆုံးပါပြီ!",
+                playAgain: "ထပ်မံ ကစားမည်",
+                reviewAnswers: "အဖြေများကို ပြန်လည်ကြည့်ရှုမည်"
+            }
+        };
+
+        const masterQuestionsData = [
+            { id: 1, category: { en: "EMERGENCY", ms: "KECEMASAN", ne: "आपातकालीन", my: "အရေးပေါ်" }, 
+              question: { en: "If you discover a fire, you should immediately raise the alarm and notify your supervisor or ERT.", ms: "Jika anda mendapati kebakaran, anda hendaklah membunyikan penggera dengan serta-merta dan memaklumkan penyelia atau ERT.", ne: "यदि तपाईंले आगो लागेको देख्नुभयो भने, तुरुन्तै अलार्म बजाउनुपर्छ र आफ्नो पर्यवेक्षक वा ERT लाई सूचित गर्नुपर्छ।", my: "မီးလောင်မှုကို တွေ့ရှိပါက ချက်ချင်း အချက်ပေးခေါင်းလောင်းတီးပြီး သင်၏ ကြီးကြပ်ရေးမှူး သို့မဟုတ် ERT သို့ အကြောင်းကြားရမည်။" }, 
+              answer: true, 
+              explanation: { en: "Immediate alarm activation alerts everyone in the facility to initiate safe evacuation and emergency response.", ms: "Pengaktifan penggera serta-merta memberi amaran kepada semua orang untuk memulakan pemindahan selamat.", ne: "तुरुन्तै अलार्म बजाउनाले सबैलाई सुरक्षित बाहिर निस्कन सचेत गराउँछ।", my: "ချက်ချင်း အချက်ပေးခြင်းဖြင့် အားလုံးကို ဘေးကင်းစွာ ထွက်ခွာနိုင်ရန် အကြောင်းကြားသည်။" } 
+            },
+            { id: 2, category: { en: "EMERGENCY", ms: "KECEMASAN", ne: "आपातकालीन", my: "အရေးပေါ်" }, 
+              question: { en: "During an emergency evacuation, employees may return to collect personal belongings.", ms: "Semasa pemindahan kecemasan, pekerja dibenarkan kembali untuk mengambil barangan peribadi.", ne: "आपातकालीन उद्धारको क्रममा, कर्मचारीहरू व्यक्तिगत सामानहरू लिन फर्कन सक्छन्।", my: "အရေးပေါ် ထွက်ခွာချိန်တွင် ဝန်ထမ်းများသည် ကိုယ်ပိုင်ပစ္စည်းများ ပြန်ယူရန် ပြန်ဝင်နိုင်သည်။" }, 
+              answer: false, 
+              explanation: { en: "Never delay evacuation or re-enter a dangerous building for personal items.", ms: "Jangan sekali-kali melambat-lambatkan pemindahan atau memasuki semula bangunan demi barangan peribadi.", ne: "व्यक्तिगत सामानको लागि कहिल्यै ढिलाइ नगर्नुहोस् वा भवनमा पुन: नपस्नुहोस्।", my: "ကိုယ်ပိုင်ပစ္စည်းများအတွက် မည်သည့်အခါမျှ ကြန့်ကြာမှု မရှိစေရ။" } 
+            },
+            { id: 3, category: { en: "EMERGENCY", ms: "KECEMASAN", ne: "आपातकालीन", my: "အရေးပေါ်" }, 
+              question: { en: "Employees should proceed directly to the Assembly Point when instructed to evacuate.", ms: "Pekerja hendaklah terus ke Tempat Perhimpunan (Assembly Point) apabila diarahkan berpindah.", ne: "खाली गर्न निर्देशन दिँदा कर्मचारीहरू सिधै असेम्ब्ली पोइन्टमा जानुपर्छ।", my: "ထွက်ခွာရန် ညွှန်ကြားသည့်အခါ စုရပ်နေရာ (Assembly Point) သို့ တိုက်ရိုက် သွားရမည်။" }, 
+              answer: true, 
+              explanation: { en: "Assembly Points allow roll calls to ensure all personnel are safely accounted for.", ms: "Tempat perhimpunan membolehkan pendaftaran headcount dibuat bagi memastikan semua selamat.", ne: "असेम्ब्ली पोइन्टले सबै कर्मचारीहरू सुरक्षित छन् भनी सुनिश्चित गर्न मद्दत गर्छ।", my: "စုရပ်နေရာသည် အားလုံး ဘေးကင်းကြောင်း စစ်ဆေးရန် ဖြစ်သည်။" } 
+            },
+            { id: 4, category: { en: "FIRST AID", ms: "PERTOLONGAN CEMAS", ne: "प्राथमिक उपचार", my: "ရှေးဦးသူနာပြု" }, 
+              question: { en: "Only trained First Aiders or ERT members should provide first aid unless there is an immediate life-threatening emergency.", ms: "Hanya Ahli Pertolongan Cemas atau ERT terlatih sahaja yang boleh memberikan pertolongan cemas.", ne: "तालिमप्राप्त प्राथमिक उपचारक वा ERT सदस्यहरूले मात्र प्राथमिक उपचार दिनुपर्छ।", my: "လေ့ကျင့်ထားသော ရှေးဦးသူနာပြု သို့မဟုတ် ERT အဖွဲ့ဝင်များသာ ရှေးဦးသူနာပြုစုခြင်း ပြုလုပ်ရမည်။" }, 
+              answer: true, 
+              explanation: { en: "Proper first aid training prevents further injury and ensures correct medical procedures.", ms: "Latihan pertolongan cemas yang betul mengelakkan kecederaan berlanjutan.", ne: "उचित प्राथमिक उपचारले थप चोटपटकबाट बचाउँछ।", my: "မှန်ကန်သော ရှေးဦးသူနာပြုမှုသည် နောက်ထပ် ဒဏ်ရာရရှိမှုကို တားဆီးပေးသည်။" } 
+            },
+            { id: 5, category: { en: "FIRST AID", ms: "PERTOLONGAN CEMAS", ne: "प्राथमिक उपचार", my: "ရှေးဦးသူနာပြု" }, 
+              question: { en: "Every employee should know the location of the nearest First Aid Box in their work area.", ms: "Setiap pekerja perlu mengetahui lokasi Peti Pertolongan Cemas terdekat di kawasan kerja.", ne: "प्रत्येक कर्मचारीलाई आफ्नो कार्य क्षेत्रमा नजिकैको फर्स्ट एड बक्सको स्थान थाहा हुनुपर्छ।", my: "ဝန်ထမ်းတိုင်းသည် မိမိလုပ်ငန်းခွင်ရှိ အနီးဆုံး ရှေးဦးသူနာပြုသေတ္တာ တည်နေရာကို သိရှိရမည်။" }, 
+              answer: true, 
+              explanation: { en: "Knowing first aid locations saves critical seconds during an emergency treatment.", ms: "Mengetahui lokasi peti pertolongan cemas menjimatkan masa kritikal semasa kecemasan.", ne: "फर्स्ट एड बक्सको स्थान थाहा पाउँदा आपत्कालीन समयमा महत्त्वपूर्ण समय बचत हुन्छ।", my: "တည်နေရာကို သိရှိခြင်းက အရေးပေါ်အချိန်တွင် အရေးကြီးသော စက္ကန့်များကို ကယ်တင်ပေးသည်။" } 
+            },
+            { id: 6, category: { en: "INCIDENT", ms: "INSIDEN", ne: "घटना", my: "ဖြစ်ရပ်" }, 
+              question: { en: "Near misses do not need to be reported because nobody was injured.", ms: "Hampir kemalangan (Near miss) tidak perlu dilaporkan kerana tiada sesiapa yang cedera.", ne: "नियर मिस (Near miss) रिपोर्ट गर्न आवश्यक छैन किनभने कसैलाई चोट लागेको छैन।", my: "မည်သူမျှ ဒဏ်ရာမရရှိသဖြင့် နီးကပ်စွာ ဖြစ်ပွားလုနီးပါး ဖြစ်ရပ်များ (Near miss) ကို သတင်းပို့ရန် မလိုပါ။" }, 
+              answer: false, 
+              explanation: { en: "Near misses are warning signs. Reporting them allows hazards to be fixed before real injuries occur.", ms: "Near miss adalah tanda amaran. Melaporkannya membolehkan bahaya dibetulkan sebelum kemalangan sebenar berlaku.", ne: "नियर मिसहरू चेतावनी हुन्। रिपोर्ट गर्नाले वास्तविक दुर्घटना हुनु अघि खतराहरू हटाउन सकिन्छ।", my: "Near miss များသည် သတိပေးချက်များ ဖြစ်သည်။ ၎င်းတို့ကို သတင်းပို့ခြင်းဖြင့် အမှန်တကယ် ဒဏ်ရာမရမီ တားဆီးနိုင်သည်။" } 
+            },
+            { id: 7, category: { en: "INCIDENT", ms: "INSIDEN", ne: "घटना", my: "ဖြစ်ရပ်" }, 
+              question: { en: "Unsafe conditions should be reported immediately to your supervisor or the EHS Department.", ms: "Keadaan tidak selamat hendaklah dilaporkan dengan serta-merta kepada penyelia atau Jabatan EHS.", ne: "असुरक्षित परिस्थितिहरू तुरुन्तै तपाईंको पर्यवेक्षक वा EHS विभागमा रिपोर्ट गरिनुपर्छ।", my: "မဘေးကင်းသော အခြေအနေများကို သင်၏ ကြီးကြပ်ရေးမှူး သို့မဟုတ် EHS ဌာနသို့ ချက်ချင်း သတင်းပို့ရမည်။" }, 
+              answer: true, 
+              explanation: { en: "Prompt reporting eliminates hazards before an accident happens.", ms: "Pelaporan pantas menghapuskan bahaya sebelum kemalangan berlaku.", ne: "तुरुन्त रिपोर्ट गर्नाले दुर्घटना हुनु अघि नै खतराहरू हटाउँछ।", my: "လျင်မြန်စွာ သတင်းပို့ခြင်းသည် မတော်တဆမှု မဖြစ်မီ အန္တရာယ်ကို ဖယ်ရှားပေးသည်။" } 
+            },
+            { id: 8, category: { en: "FIRE SAFETY", ms: "KESELAMATAN KEBAKARAN", ne: "आगो सुरक्षा", my: "မီးဘေးကင်းရေး" }, 
+              question: { en: "A CO₂ fire extinguisher is commonly used for electrical fires.", ms: "Pemadam api CO₂ biasanya digunakan untuk kebakaran elektrik.", ne: "CO₂ फायर एक्सटिङ्गुइसर सामान्यतया विद्युतीय आगोको लागि प्रयोग गरिन्छ।", my: "CO₂ မီးသတ်ဆေးဗူးကို လျှပ်စစ် မီးလောင်မှုများတွင် ပုံမှန် အသုံးပြုသည်။" }, 
+              answer: true, 
+              explanation: { en: "CO₂ is non-conductive and leaves no residue, making it ideal for electrical equipment fires.", ms: "CO₂ tidak mengalirkan elektrik dan tidak meninggalkan sisa, sesuai untuk peralatan elektrik.", ne: "CO₂ ले बिजुली सञ्चालन गर्दैन र अवशेष छोड्दैन, त्यसैले यो विद्युतीय आगोका लागि उत्तम छ।", my: "CO₂ သည် လျှပ်စစ်မကူးစက်ဘိုင်း လျှပ်စစ်မီးလောင်မှုအတွက် အကောင်းဆုံး ဖြစ်သည်။" } 
+            },
+            { id: 9, category: { en: "FIRE SAFETY", ms: "KESELAMATAN KEBAKARAN", ne: "आगो सुरक्षा", my: "မီးဘေးကင်းရေး" }, 
+              question: { en: "A Water fire extinguisher is suitable for extinguishing electrical fires.", ms: "Pemadam api Jenis Air sesuai digunakan untuk memadamkan kebakaran elektrik.", ne: "पानीको फायर एक्सटिङ्गुइसर विद्युतीय आगो निभाउन उपयुक्त हुन्छ।", my: "ရေမီးသတ်ဆေးဗူးသည် လျှပ်စစ် မီးလောင်မှုကို ငြှိမ်းသတ်ရန် သင့်တော်သည်။" }, 
+              answer: false, 
+              explanation: { en: "Water conducts electricity and presents severe electrocution risks on live electrical fires.", ms: "Air mengalirkan elektrik dan berisiko menyebabkan kejutan elektrik yang parah.", ne: "पानीले बिजुली सञ्चालन गर्छ र यसले गम्भीर करेन्ट लाग्ने जोखिम निम्त्याउँछ।", my: "ရေသည် လျှပ်စစ်ကူးစက်သဖြင့် ဓာတ်လိုက်မှု အန္တရာယ် ကြီးမားစွာ ဖြစ်ပေါ်စေသည်။" } 
+            },
+            { id: 10, category: { en: "FIRE SAFETY", ms: "KESELAMATAN KEBAKARAN", ne: "आगो सुरक्षा", my: "မီးဘေးကင်းရေး" }, 
+              question: { en: "Employees should only use a fire extinguisher if they are trained and it is safe to do so.", ms: "Pekerja hanya boleh menggunakan pemadam api jika terlatih dan keadaan selamat.", ne: "कर्मचारीहरूले तालिम प्राप्त र सुरक्षित भएमा मात्र फायर एक्सटिङ्गुइसर प्रयोग गर्नुपर्छ।", my: "ဝန်ထမ်းများသည် လေ့ကျင့်သင်ကြားထားပြီး ဘေးကင်းပါကမှသာ မီးသတ်ဆေးဗူးကို အသုံးပြုရမည်။" }, 
+              answer: true, 
+              explanation: { en: "Attempting to fight a fire without training or proper equipment puts lives at risk.", ms: "Mencuba memadamkan api tanpa latihan membahayakan nyawa.", ne: "तालिम बिना आगो निभाउने प्रयास गर्दा ज्यान जोखिममा पर्छ।", my: "လေ့ကျင့်မှုမရှိဘဲ မီးငြှိမ်းသတ်ရန် ကြိုးပမ်းခြင်းသည် အသက်အန္တရာယ် ရှိသည်။" } 
+            },
+            { id: 11, category: { en: "PPE", ms: "PPE", ne: "PPE", my: "PPE" }, 
+              question: { en: "PPE should be worn whenever required by the work area or safety signage.", ms: "PPE mesti dipakai apabila diwajibkan oleh kawasan kerja atau tanda keselamatan.", ne: "कार्यक्षेत्र वा सुरक्षा संकेत अनुसार आवश्यक परेको बेला सधैं PPE लगाउनुपर्छ।", my: "လုပ်ငန်းခွင် သို့မဟုတ် ဘေးကင်းရေး အမှတ်အသားများမှ လိုအပ်သည့်အခါတိုင်း PPE ကို ဝတ်ဆင်ရမည်။" }, 
+              answer: true, 
+              explanation: { en: "Personal Protective Equipment is mandatory in designated areas to protect against hazards.", ms: "Peralatan Perlindungan Diri diwajibkan di kawasan khas untuk melindungi daripada bahaya.", ne: "खतराबाट बचाउन तोकिएका क्षेत्रहरूमा PPE अनिवार्य छ।", my: "အန္တရာယ်များမှ ကာကွယ်ရန် သတ်မှတ်ထားသော နေရာများတွင် PPE ဝတ်ဆင်ရန် လိုအပ်သည်။" } 
+            },
+            { id: 12, category: { en: "PPE", ms: "PPE", ne: "PPE", my: "PPE" }, 
+              question: { en: "Damaged PPE should continue to be used until the next replacement schedule.", ms: "PPE yang rosak boleh terus digunakan sehingga jadual penggantian seterusnya.", ne: "क्षतिग्रस्त PPE अर्को प्रतिस्थापन तालिका सम्म प्रयोग गर्न सकिन्छ।", my: "ပျက်စီးနေသော PPE ကို နောက်ထပ် လဲလှယ်မည့် အချိန်ဇယားအထိ ဆက်လက် အသုံးပြုနိုင်သည်။" }, 
+              answer: false, 
+              explanation: { en: "Damaged or worn PPE loses its protective capability and must be replaced immediately.", ms: "PPE yang rosak hilang keupayaan perlindungan dan mesti diganti serta-merta.", ne: "क्षतिग्रस्त PPE ले सुरक्षा प्रदान गर्दैन र तुरुन्तै फेरिनुपर्छ।", my: "ပျက်စီးနေသော PPE သည် ကာကွယ်နိုင်စွမ်း မရှိတော့သဖြင့် ချက်ချင်း လဲလှယ်ရမည်။" } 
+            },
+            { id: 13, category: { en: "PPE", ms: "PPE", ne: "PPE", my: "PPE" }, 
+              question: { en: "Safety shoes help protect workers from falling objects and sharp materials.", ms: "Kasut keselamatan membantu melindungi pekerja daripada objek jatuh dan bahan tajam.", ne: "सुरक्षा जुत्ताले कामदारहरूलाई खस्ने वस्तुहरू र तीखा सामग्रीहरूबाट बचाउन मद्दत गर्छ।", my: "ဘေးကင်းရေး ဓာတ်ပြားဖိနပ်များသည် ပြုတ်ကျသော ပစ္စည်းများနှင့် ထက်သော ပစ္စည်းများမှ ကာကွယ်ပေးသည်။" }, 
+              answer: true, 
+              explanation: { en: "Steel or composite toe safety footwear guards against crushing injuries and punctures.", ms: "Kasut keselamatan melindungi kaki daripada kecederaan remuk dan tusukan.", ne: "सुरक्षा जुत्ताले खुट्टालाई किचिन र प्وال पर्नबाट बचाउँछ।", my: "ဘေးကင်းရေး ဖိနပ်များသည် ခြေထောက် ကျိုးကြေခြင်းနှင့် စူးဝင်ခြင်းမှ ကာကွယ်ပေးသည်။" } 
+            },
+            { id: 14, category: { en: "HAZARD SIGN", ms: "TANDA BAHAYA", ne: "सुरक्षा संकेत", my: "အန္တရာယ် အမှတ်အသား" }, 
+              question: { en: "A mandatory sign (blue circle) indicates an action that must be followed.", ms: "Tanda mandatori (bulatan biru) menunjukkan tindakan yang wajib dipatuhi.", ne: "अनिवार्य संकेत (नीलो वृत्त) ले पालन गर्नुपर्ने कार्यलाई जनाउँछ।", my: "မဖြစ်မနေ လိုက်နာရမည့် အမှတ်အသား (အပြာရောင် စက်ဝိုင်း) သည် လိုက်နာရမည့် လုပ်ဆောင်ချက်ကို ဖော်ပြသည်။" }, 
+              answer: true, 
+              explanation: { en: "Blue circular signs specify mandatory safety actions like 'Wear Safety Goggles'.", ms: "Tanda bulatan biru menentukan tindakan wajib seperti 'Pakai Cermin Mata Keselamatan'.", ne: "नीलो गोलाकार संकेतहरूले अनिवार्य सुरक्षा कार्यहरू तोक्छन्।", my: "အပြာရောင် စက်ဝိုင်းများသည် 'ဘေးကင်းရေး မျက်မှန် တပ်ပါ' ကဲ့သို့သော မဖြစ်မနေ လိုက်နာရမည့် အချက်များ ဖြစ်သည်။" } 
+            },
+            { id: 15, category: { en: "HAZARD SIGN", ms: "TANDA BAHAYA", ne: "सुरक्षा संकेत", my: "အန္တရာယ် အမှတ်အသား" }, 
+              question: { en: "A red prohibition sign means the activity shown is not allowed.", ms: "Tanda merah melarang aktiviti berbahaya seperti 'Dilarang Merokok'.", ne: "रातो निषेध संकेतको अर्थ देखाइएको गतिविधि अनुमति छैन भन्ने हो।", my: "အနီရောင် တားမြစ်ချက် အမှတ်အသားသည် ဖော်ပြထားသော လုပ်ဆောင်ချက်ကို မပြုလုပ်ရဟု အဓိပ္ပာယ်ရသည်။" }, 
+              answer: true, 
+              explanation: { en: "Red circular signs with diagonal slashes prohibit dangerous activities like 'No Smoking'.", ms: "Tanda merah melarang aktiviti berbahaya seperti 'Dilarang Merokok'.", ne: "रातो संकेतहरूले 'धूम्रपान निषेध' जस्ता खतरनाक गतिविधिहरूलाई निषेध गर्छन्।", my: "အနီရောင် အမှတ်အသားများသည် 'ဆေးလိပ်မသောက်ရ' ကဲ့သို့သော အန္တရာယ်ရှိသော လုပ်ဆောင်ချက်များကို တားမြစ်သည်။" } 
+            }
+        ];
+
+        window.changeLanguage = function(lang) {
+            currentLang = lang;
+            const dict = uiTranslations[lang] || uiTranslations.en;
+
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (dict[key]) {
+                    el.innerText = dict[key];
+                }
+            });
+
+            if (activeQuestions.length > 0) {
+                loadQuestion(currentIndex);
+            }
+        };
+
+        function getLocalizedField(itemField) {
+            if (!itemField) return "";
+            if (typeof itemField === 'string') return itemField;
+            return itemField[currentLang] || itemField['en'] || "";
+        }
+
+        // Standardized deterministic set based on IDs so all languages see the same order
+        function prepareQuestionPool() {
+            activeQuestions = masterQuestionsData.slice(0, 15).sort((a, b) => a.id - b.id);
+            if (userAnswers.length !== activeQuestions.length) {
+                userAnswers = new Array(activeQuestions.length).fill(null);
+            }
+        }
+
+        window.showScreen = function(screenId) {
+            ['screen-welcome', 'screen-quiz', 'screen-grid', 'screen-results', 'screen-admin'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+            const target = document.getElementById(screenId);
+            if (target) target.classList.remove('hidden');
+
+            if (screenId === 'screen-admin') {
+                renderAdminResultsTable();
+            }
+        };
+
+        window.setMode = function(mode) {
+            currentMode = mode;
+            const gameBtn = document.getElementById('mode-game-btn');
+            const pptBtn = document.getElementById('mode-ppt-btn');
+
+            if (mode === 'presenter') {
+                pptBtn.className = "px-3 py-1.5 rounded-lg font-bold transition-all bg-amber-500 text-slate-950 shadow-md";
+                gameBtn.className = "px-3 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all";
+            } else {
+                gameBtn.className = "px-3 py-1.5 rounded-lg font-bold transition-all bg-cyan-500 text-slate-950 shadow-md";
+                pptBtn.className = "px-3 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition-all";
+            }
+            loadQuestion(currentIndex);
+        };
+
+        window.validateAndStartGame = function() {
+            const nameInput = document.getElementById('participant-name').value.trim();
+            const idInput = document.getElementById('participant-id').value.trim();
+            const errorMsg = document.getElementById('login-error-msg');
+
+            if (!nameInput || !idInput) {
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            errorMsg.classList.add('hidden');
+            participantInfo = { name: nameInput, employeeId: idInput };
+
+            score = 0;
+            streak = 0;
+            currentIndex = 0;
+            document.getElementById('score-display').innerText = '0';
+            document.getElementById('streak-count').innerText = '0';
+
+            prepareQuestionPool();
+            userAnswers = new Array(activeQuestions.length).fill(null);
+            showScreen('screen-quiz');
+            loadQuestion(currentIndex);
+        };
+
+        function loadQuestion(index) {
+            if (activeQuestions.length === 0) prepareQuestionPool();
+
+            const q = activeQuestions[index];
+            document.getElementById('q-category').innerText = getLocalizedField(q.category);
+            document.getElementById('current-q-num').innerText = index + 1;
+            document.getElementById('total-q-num').innerText = activeQuestions.length;
+            document.getElementById('question-text').innerText = getLocalizedField(q.question);
+            document.getElementById('explanation-text').innerText = getLocalizedField(q.explanation);
+            
+            document.getElementById('stage-set-label').innerText = 'STAGE QUESTION • STANDARDIZED SET';
+
+            const progressPct = ((index + 1) / activeQuestions.length) * 100;
+            document.getElementById('progress-bar').style.width = `${progressPct}%`;
+
+            const expBox = document.getElementById('answer-explanation');
+            if (userAnswers[index] !== null) {
+                expBox.classList.remove('hidden');
+            } else {
+                expBox.classList.add('hidden');
+            }
+
+            if (currentMode === 'presenter') {
+                document.getElementById('presenter-controls').classList.remove('hidden');
+            } else {
+                document.getElementById('presenter-controls').classList.add('hidden');
+            }
+        }
+
+        window.submitAnswer = function(userChoice) {
+            if (userAnswers[currentIndex] !== null) return;
+
+            const q = activeQuestions[currentIndex];
+            userAnswers[currentIndex] = userChoice;
+
+            const isCorrect = userChoice === q.answer;
+            if (isCorrect) {
+                score += 10;
+                streak++;
+                playCorrectSound();
+                showToast("✓ Correct Answer! +10 Pts");
+            } else {
+                streak = 0;
+                playWrongSound();
+                showToast("✗ Incorrect Choice");
+            }
+
+            document.getElementById('score-display').innerText = score;
+            document.getElementById('streak-count').innerText = streak;
+            document.getElementById('answer-explanation').classList.remove('hidden');
+
+            setTimeout(() => {
+                if (currentIndex < activeQuestions.length - 1) {
+                    currentIndex++;
+                    loadQuestion(currentIndex);
+                } else {
+                    endGame();
+                }
+            }, 1500);
+        };
+
+        window.toggleAnswerReveal = function() {
+            const expBox = document.getElementById('answer-explanation');
+            expBox.classList.toggle('hidden');
+        };
+
+        window.prevQuestion = function() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                loadQuestion(currentIndex);
+            }
+        };
+
+        window.nextQuestion = function() {
+            if (currentIndex < activeQuestions.length - 1) {
+                currentIndex++;
+                loadQuestion(currentIndex);
+            }
+        };
+
+        window.showGridScreen = function() {
+            if (activeQuestions.length === 0) prepareQuestionPool();
+
+            showScreen('screen-grid');
+            const gridContainer = document.getElementById('questions-grid');
+            gridContainer.innerHTML = '';
+
+            activeQuestions.forEach((q, idx) => {
+                const card = document.createElement('div');
+                const isAnswered = userAnswers[idx] !== null;
+                const isCorrect = isAnswered && userAnswers[idx] === q.answer;
+
+                let borderStyle = "border-slate-800 bg-slate-900/60 hover:border-cyan-400";
+                if (isAnswered) {
+                    borderStyle = isCorrect ? "border-emerald-500 bg-emerald-950/40" : "border-rose-500 bg-rose-950/40";
+                }
+
+                card.className = `p-3 rounded-xl border ${borderStyle} cursor-pointer transition-all flex flex-col justify-between space-y-2 text-left`;
+                card.onclick = () => {
+                    currentIndex = idx;
+                    showScreen('screen-quiz');
+                    loadQuestion(currentIndex);
+                };
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between text-xs font-tech">
+                        <span class="text-cyan-400 font-bold">#${idx + 1} (Q${q.id})</span>
+                        <span class="text-[10px] text-slate-400 uppercase truncate max-w-[70px]">${getLocalizedField(q.category)}</span>
+                    </div>
+                    <div class="text-xs font-sans text-slate-200 line-clamp-2">${getLocalizedField(q.question)}</div>
+                    <div class="text-[10px] font-tech text-amber-400 font-bold">
+                        ${isAnswered ? (isCorrect ? '✓ CORRECT' : '✗ WRONG') : 'SELECT SLIDE'}
+                    </div>
+                `;
+                gridContainer.appendChild(card);
+            });
+        };
+
+        function endGame() {
+            showScreen('screen-results');
+            
+            let correctCount = 0;
+            userAnswers.forEach((ans, idx) => {
+                if (ans === activeQuestions[idx].answer) correctCount++;
+            });
+
+            const accuracy = Math.round((correctCount / activeQuestions.length) * 100);
+
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('final-accuracy').innerText = `${accuracy}%`;
+            document.getElementById('final-count').innerText = `${correctCount} / ${activeQuestions.length}`;
+
+            const msg = document.getElementById('result-message');
+            if (accuracy >= 90) {
+                msg.innerText = "🌟 OUTSTANDING! Certified EHS Safety Champion!";
+            } else if (accuracy >= 60) {
+                msg.innerText = "👍 GOOD JOB! Solid understanding of EHS Rules.";
+            } else {
+                msg.innerText = "⚠️ NEEDS IMPROVEMENT! Please review EHS Guidelines.";
+            }
+
+            // Save to Results DB / Cloud
+            const resultData = {
+                name: participantInfo.name || "Anonymous",
+                employeeId: participantInfo.employeeId || "N/A",
+                score: score,
+                accuracy: accuracy,
+                correctCount: correctCount,
+                totalQuestions: activeQuestions.length,
+                date: new Date().toLocaleString()
+            };
+
+            if (window.saveParticipantResultToCloud) {
+                window.saveParticipantResultToCloud(resultData);
+            }
+        }
+
+        window.restartGame = function() {
+            prepareQuestionPool();
+            userAnswers = new Array(activeQuestions.length).fill(null);
+            score = 0;
+            streak = 0;
+            currentIndex = 0;
+            document.getElementById('score-display').innerText = '0';
+            document.getElementById('streak-count').innerText = '0';
+            showScreen('screen-welcome');
+        };
+
+        /* RESULTS HUB DASHBOARD RENDERER */
+        window.updateLiveResultsTable = function(data) {
+            allResultsData = data || [];
+            renderAdminResultsTable();
+        };
+
+        function renderAdminResultsTable() {
+            const tbody = document.getElementById('results-table-body');
+            const searchVal = (document.getElementById('admin-search')?.value || '').toLowerCase();
+            if (!tbody) return;
+
+            let filteredData = allResultsData.filter(item => 
+                (item.name && item.name.toLowerCase().includes(searchVal)) ||
+                (item.employeeId && item.employeeId.toLowerCase().includes(searchVal))
+            );
+
+            // Sort by score descending
+            filteredData.sort((a, b) => b.score - a.score);
+
+            // Stats calculation
+            const total = filteredData.length;
+            const avgScore = total > 0 ? Math.round(filteredData.reduce((acc, c) => acc + (c.score || 0), 0) / total) : 0;
+            const avgAcc = total > 0 ? Math.round(filteredData.reduce((acc, c) => acc + (c.accuracy || 0), 0) / total) : 0;
+            const topScorer = total > 0 ? filteredData[0].name : '-';
+
+            document.getElementById('stat-total-count').innerText = total;
+            document.getElementById('stat-avg-score').innerText = avgScore;
+            document.getElementById('stat-avg-accuracy').innerText = `${avgAcc}%`;
+            document.getElementById('stat-top-scorer').innerText = topScorer;
+
+            if (filteredData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-500 font-tech">No participant records found in the cloud yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filteredData.map((item, idx) => `
+                <tr class="hover:bg-slate-800/50 transition-colors">
+                    <td class="p-4 font-tech font-bold ${idx < 3 ? 'text-amber-400' : 'text-slate-400'}">#${idx + 1}</td>
+                    <td class="p-4 font-semibold text-white">${item.name || 'Anonymous'}</td>
+                    <td class="p-4 font-mono text-cyan-300">${item.employeeId || '-'}</td>
+                    <td class="p-4 text-center font-tech font-bold text-yellow-400">${item.score || 0}</td>
+                    <td class="p-4 text-center font-tech text-emerald-400">${item.accuracy || 0}%</td>
+                    <td class="p-4 text-center font-tech text-slate-300">${item.correctCount || 0} / ${item.totalQuestions || 15}</td>
+                    <td class="p-4 text-right font-tech text-slate-400 text-xs">${item.date || item.timestamp || '-'}</td>
+                </tr>
+            `).join('');
+        }
+
+        window.exportResultsCSV = function() {
+            if (allResultsData.length === 0) {
+                showToast("No data to export!");
+                return;
+            }
+            let csvContent = "data:text/csv;charset=utf-8,Name,Employee ID,Score,Accuracy,Correct,Date\n";
+            allResultsData.forEach(r => {
+                csvContent += `"${r.name}","${r.employeeId}",${r.score},${r.accuracy}%,${r.correctCount},"${r.date}"\n`;
+            });
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "EHS_Quiz_Results.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        };
+
+        /* MOBILE SCAN QR MODAL LOGIC */
+        window.openQRModal = function() {
+            const modal = document.getElementById('qr-modal');
+            modal.classList.remove('hidden');
+            
+            const currentURL = window.location.href;
+            document.getElementById('join-url-text').innerText = currentURL;
+            document.getElementById('custom-qr-url-input').value = currentURL;
+
+            generateQRCode(currentURL);
+        };
+
+        window.closeQRModal = function() {
+            document.getElementById('qr-modal').classList.add('hidden');
+        };
+
+        window.updateQRCodeFromInput = function() {
+            const inputVal = document.getElementById('custom-qr-url-input').value.trim();
+            const targetUrl = inputVal || window.location.href;
+            document.getElementById('join-url-text').innerText = targetUrl;
+            generateQRCode(targetUrl);
+        };
+
+        function generateQRCode(url) {
+            const container = document.getElementById('qrcode-container');
+            container.innerHTML = '';
+            qrGenerator = new QRCode(container, {
+                text: url,
+                width: 180,
+                height: 180,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+        }
+
+        window.copyJoinURL = function() {
+            const urlText = document.getElementById('join-url-text').innerText;
+            navigator.clipboard.writeText(urlText).then(() => {
+                showToast("Link Copied to Clipboard!");
+            });
+        };
+
+        function showToast(msg) {
+            const toast = document.getElementById('custom-toast');
+            toast.innerText = msg;
+            toast.classList.remove('hidden');
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 2500);
+        }
+
+        window.toggleFullscreen = function() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        };
+
+        // Initialize on load & setup AudioContext unlocker
+        window.onload = function() {
+            prepareQuestionPool();
+            const localData = JSON.parse(localStorage.getItem('ehs_quiz_results') || '[]');
+            allResultsData = localData;
+            renderAdminResultsTable();
+
+            document.addEventListener('click', function unlockAudio() {
+                getAudioContext();
+                document.removeEventListener('click', unlockAudio);
+            }, { once: true });
+        };
+    </script>
+</body>
+</html>
